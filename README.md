@@ -52,4 +52,5 @@ Workflow se spustí automaticky po každé změně na větvi `main`. Lze jej spu
 - minimální Android: 8.0 (API 26),
 - cílový Android: API 35,
 - application ID: `cz.fotobezprechodu`,
-- verze: 1.1.0.
+- verze: 1.1.0,
+- APK od verze 1.1.0 používá stálý testovací podpis uložený v GitHub Actions cache, takže další testovací verze lze instalovat jako aktualizace.
