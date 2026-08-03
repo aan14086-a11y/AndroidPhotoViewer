@@ -63,12 +63,12 @@ jobs:
         run: gradle :app:assembleDebug --stacktrace
 
       - name: Prepare APK file
-        run: cp app/build/outputs/apk/debug/app-debug.apk FotoBezPrechodu-v1.1.0.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk FotoBezPrechodu-v1.2.0.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Foto-bez-prechodu-v1.1.0
-          path: FotoBezPrechodu-v1.1.0.apk
+          name: Foto-bez-prechodu-v1.2.0
+          path: FotoBezPrechodu-v1.2.0.apk
           if-no-files-found: error
           retention-days: 30
