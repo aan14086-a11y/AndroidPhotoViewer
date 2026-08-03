@@ -618,11 +618,14 @@ public class MainActivity extends Activity {
             Bitmap bitmap = decodeScaledBitmap(entry.uri);
             if (bitmap != null) bitmapCache.put(key, bitmap);
             loading.remove(key);
-            if (!displayWhenReady || bitmap == null) return;
+            if (bitmap == null) return;
 
             mainHandler.post(() -> {
                 if (expectedFolder != folderRequest.get()) return;
-                showLoadedImage(index, token, bitmap);
+                if (desiredIndex == index && index < mediaItems.size()
+                        && !mediaItems.get(index).video) {
+                    showLoadedImage(index, mediaRequest.get(), bitmap);
+                }
             });
         });
     }
@@ -667,12 +670,14 @@ public class MainActivity extends Activity {
             Bitmap bitmap = decodeVideoPoster(entry.uri);
             if (bitmap != null) bitmapCache.put(key, bitmap);
             loading.remove(key);
-            if (!displayWhenReady || bitmap == null) return;
+            if (bitmap == null) return;
 
             mainHandler.post(() -> {
                 if (expectedFolder != folderRequest.get()) return;
-                if (token != mediaRequest.get() || desiredIndex != index) return;
-                imageView.setImageBitmap(bitmap);
+                if (desiredIndex == index && index < mediaItems.size()
+                        && mediaItems.get(index).video) {
+                    imageView.setImageBitmap(bitmap);
+                }
             });
         });
     }
