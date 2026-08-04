@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - agent/fix-large-image-render-v134
+      - agent/rebuild-image-viewer-v135
   pull_request:
     branches:
       - main
@@ -42,6 +42,9 @@ jobs:
 
       - name: Apply v1.3.4 large image render fix
         run: python3 tools/apply_v134.py
+
+      - name: Apply v1.3.5 rebuilt image viewer
+        run: python3 tools/apply_v135.py
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -86,12 +89,12 @@ jobs:
         run: gradle :app:assembleDebug --stacktrace
 
       - name: Prepare APK file
-        run: cp app/build/outputs/apk/debug/app-debug.apk FotoBezPrechodu-v1.3.4.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk FotoBezPrechodu-v1.3.5.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Foto-bez-prechodu-v1.3.4
-          path: FotoBezPrechodu-v1.3.4.apk
+          name: Foto-bez-prechodu-v1.3.5
+          path: FotoBezPrechodu-v1.3.5.apk
           if-no-files-found: error
           retention-days: 30
