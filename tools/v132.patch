@@ -1,0 +1,154 @@
+diff -ruN a/app/build.gradle b/app/build.gradle
+--- a/app/build.gradle	2026-08-04 04:58:35.340600412 +0000
++++ b/app/build.gradle	2026-08-04 05:08:09.560578376 +0000
+@@ -10,8 +10,8 @@
+         applicationId 'cz.fotobezprechodu'
+         minSdk 26
+         targetSdk 35
+-        versionCode 5
+-        versionName '1.3.1'
++        versionCode 6
++        versionName '1.3.2'
+     }
+ 
+     compileOptions {
+diff -ruN a/app/src/main/java/cz/fotobezprechodu/MediaUtils.java b/app/src/main/java/cz/fotobezprechodu/MediaUtils.java
+--- a/app/src/main/java/cz/fotobezprechodu/MediaUtils.java	2026-08-04 04:58:35.340600412 +0000
++++ b/app/src/main/java/cz/fotobezprechodu/MediaUtils.java	2026-08-04 05:08:09.560578376 +0000
+@@ -11,8 +11,10 @@
+ import android.media.MediaMetadataRetriever;
+ import android.net.Uri;
+ import android.os.Build;
++import android.os.ParcelFileDescriptor;
+ import android.provider.DocumentsContract;
+ 
++import java.io.FileDescriptor;
+ import java.io.InputStream;
+ import java.text.Collator;
+ import java.util.ArrayList;
+@@ -143,8 +145,19 @@
+ 
+     private static Bitmap decodeImageOnce(Context context, Uri uri, int target) {
+         ContentResolver resolver = context.getContentResolver();
+-        try {
+-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
++
++        // Prefer BitmapFactory through a freshly opened file descriptor. A number of
++        // Android document providers expose image URIs that MediaPlayer can read, but
++        // ImageDecoder rejects. Reopening the descriptor for bounds and pixels also
++        // works with providers whose descriptors cannot be rewound.
++        Bitmap bitmap = decodeWithFileDescriptor(resolver, uri, target);
++        if (bitmap == null) bitmap = decodeWithStreams(resolver, uri, target);
++        if (bitmap != null) return applyExifOrientation(resolver, uri, bitmap);
++
++        // ImageDecoder remains a fallback for formats BitmapFactory cannot decode,
++        // for example some HEIF/animated images on newer Android versions.
++        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
++            try {
+                 ImageDecoder.Source source = ImageDecoder.createSource(resolver, uri);
+                 return ImageDecoder.decodeBitmap(source, (decoder, info, src) -> {
+                     int width = info.getSize().getWidth();
+@@ -156,41 +169,76 @@
+                     decoder.setMemorySizePolicy(ImageDecoder.MEMORY_POLICY_LOW_RAM);
+                     decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE);
+                 });
++            } catch (Exception | OutOfMemoryError ignored) {
+             }
++        }
++        return null;
++    }
+ 
+-            BitmapFactory.Options bounds = new BitmapFactory.Options();
+-            bounds.inJustDecodeBounds = true;
+-            try (InputStream stream = resolver.openInputStream(uri)) {
+-                if (stream == null) return null;
+-                BitmapFactory.decodeStream(stream, null, bounds);
+-            }
+-            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
+-            int sample = 1;
+-            while (Math.max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= target) sample *= 2;
+-            BitmapFactory.Options options = new BitmapFactory.Options();
+-            options.inSampleSize = Math.max(1, sample);
+-            options.inPreferredConfig = Bitmap.Config.ARGB_8888;
+-            Bitmap bitmap;
+-            try (InputStream stream = resolver.openInputStream(uri)) {
+-                if (stream == null) return null;
+-                bitmap = BitmapFactory.decodeStream(stream, null, options);
+-            }
+-            if (bitmap == null) return null;
+-            int orientation = ExifInterface.ORIENTATION_NORMAL;
+-            try (InputStream stream = resolver.openInputStream(uri)) {
+-                if (stream != null) {
+-                    ExifInterface exif = new ExifInterface(stream);
+-                    orientation = exif.getAttributeInt(
+-                            ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
+-                }
+-            } catch (Exception ignored) {
+-            }
+-            return rotateBitmap(bitmap, orientation);
+-        } catch (Exception | OutOfMemoryError e) {
++    private static Bitmap decodeWithFileDescriptor(ContentResolver resolver, Uri uri, int target) {
++        BitmapFactory.Options bounds = new BitmapFactory.Options();
++        bounds.inJustDecodeBounds = true;
++        try (ParcelFileDescriptor descriptor = resolver.openFileDescriptor(uri, "r")) {
++            if (descriptor == null) return null;
++            FileDescriptor file = descriptor.getFileDescriptor();
++            BitmapFactory.decodeFileDescriptor(file, null, bounds);
++        } catch (Exception ignored) {
+             return null;
+         }
++        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
++
++        BitmapFactory.Options options = decodingOptions(bounds.outWidth, bounds.outHeight, target);
++        try (ParcelFileDescriptor descriptor = resolver.openFileDescriptor(uri, "r")) {
++            if (descriptor == null) return null;
++            return BitmapFactory.decodeFileDescriptor(descriptor.getFileDescriptor(), null, options);
++        } catch (Exception | OutOfMemoryError ignored) {
++            return null;
++        }
++    }
++
++    private static Bitmap decodeWithStreams(ContentResolver resolver, Uri uri, int target) {
++        BitmapFactory.Options bounds = new BitmapFactory.Options();
++        bounds.inJustDecodeBounds = true;
++        try (InputStream stream = resolver.openInputStream(uri)) {
++            if (stream == null) return null;
++            BitmapFactory.decodeStream(stream, null, bounds);
++        } catch (Exception ignored) {
++            return null;
++        }
++        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
++
++        BitmapFactory.Options options = decodingOptions(bounds.outWidth, bounds.outHeight, target);
++        try (InputStream stream = resolver.openInputStream(uri)) {
++            if (stream == null) return null;
++            return BitmapFactory.decodeStream(stream, null, options);
++        } catch (Exception | OutOfMemoryError ignored) {
++            return null;
++        }
++    }
++
++    private static BitmapFactory.Options decodingOptions(int width, int height, int target) {
++        int sample = 1;
++        while (Math.max(width, height) / (sample * 2) >= target) sample *= 2;
++        BitmapFactory.Options options = new BitmapFactory.Options();
++        options.inSampleSize = Math.max(1, sample);
++        options.inPreferredConfig = Bitmap.Config.ARGB_8888;
++        options.inDither = false;
++        return options;
++    }
++
++    private static Bitmap applyExifOrientation(ContentResolver resolver, Uri uri, Bitmap bitmap) {
++        int orientation = ExifInterface.ORIENTATION_NORMAL;
++        try (InputStream stream = resolver.openInputStream(uri)) {
++            if (stream != null) {
++                ExifInterface exif = new ExifInterface(stream);
++                orientation = exif.getAttributeInt(
++                        ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
++            }
++        } catch (Exception ignored) {
++        }
++        return rotateBitmap(bitmap, orientation);
+     }
+ 
+     static Bitmap decodeVideoFrame(Context context, Uri uri, int targetPx) {
