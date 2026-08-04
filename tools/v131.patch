@@ -1,0 +1,280 @@
+diff --git a/app/build.gradle b/app/build.gradle
+index d987ff4..bbec057 100644
+--- a/app/build.gradle
++++ b/app/build.gradle
+@@ -10,8 +10,8 @@ android {
+         applicationId 'cz.fotobezprechodu'
+         minSdk 26
+         targetSdk 35
+-        versionCode 4
+-        versionName '1.3.0'
++        versionCode 5
++        versionName '1.3.1'
+     }
+ 
+     compileOptions {
+diff --git a/app/src/main/java/cz/fotobezprechodu/BrowserActivity.java b/app/src/main/java/cz/fotobezprechodu/BrowserActivity.java
+index 28509b6..b20a6d5 100644
+--- a/app/src/main/java/cz/fotobezprechodu/BrowserActivity.java
++++ b/app/src/main/java/cz/fotobezprechodu/BrowserActivity.java
+@@ -1,6 +1,7 @@
+ package cz.fotobezprechodu;
+ 
+ import android.app.Activity;
++import android.content.ClipData;
+ import android.content.Intent;
+ import android.content.SharedPreferences;
+ import android.graphics.Bitmap;
+@@ -32,6 +33,9 @@ public class BrowserActivity extends Activity {
+     static final String EXTRA_TREE_URI = "tree_uri";
+     static final String EXTRA_FOLDER_ID = "folder_id";
+     static final String EXTRA_SELECTED_ID = "selected_id";
++    static final String EXTRA_SELECTED_URI = "selected_uri";
++    static final String EXTRA_SELECTED_NAME = "selected_name";
++    static final String EXTRA_SELECTED_MIME = "selected_mime";
+ 
+     private static final int REQUEST_TREE = 2001;
+     private static final String PREFS = "foto_bez_prechodu";
+@@ -315,7 +319,18 @@ public class BrowserActivity extends Activity {
+         intent.putExtra(EXTRA_TREE_URI, treeUri.toString());
+         intent.putExtra(EXTRA_FOLDER_ID, currentFolderId);
+         intent.putExtra(EXTRA_SELECTED_ID, selected.documentId);
+-        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
++        intent.putExtra(EXTRA_SELECTED_URI, selected.uri.toString());
++        intent.putExtra(EXTRA_SELECTED_NAME, selected.name);
++        intent.putExtra(EXTRA_SELECTED_MIME, selected.mime);
++
++        // Flags without an attached URI do not grant anything on some document providers.
++        // Put both the tree and selected document into ClipData so ViewerActivity can
++        // read the chosen picture immediately even when persistable access is unavailable.
++        ClipData grants = ClipData.newRawUri("folder", treeUri);
++        grants.addItem(new ClipData.Item(selected.uri));
++        intent.setClipData(grants);
++        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
++                | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+         startActivity(intent);
+     }
+ 
+diff --git a/app/src/main/java/cz/fotobezprechodu/MediaUtils.java b/app/src/main/java/cz/fotobezprechodu/MediaUtils.java
+index f7c8c51..f872ad6 100644
+--- a/app/src/main/java/cz/fotobezprechodu/MediaUtils.java
++++ b/app/src/main/java/cz/fotobezprechodu/MediaUtils.java
+@@ -128,8 +128,21 @@ final class MediaUtils {
+     }
+ 
+     static Bitmap decodeImage(Context context, Uri uri, int targetPx) {
++        int requested = Math.max(128, targetPx);
++        int[] attempts = {requested, Math.min(requested, 2048), Math.min(requested, 1280)};
++        int previous = -1;
++        for (int target : attempts) {
++            if (target == previous) continue;
++            previous = target;
++            Bitmap bitmap = decodeImageOnce(context, uri, target);
++            if (bitmap != null) return bitmap;
++            System.gc();
++        }
++        return null;
++    }
++
++    private static Bitmap decodeImageOnce(Context context, Uri uri, int target) {
+         ContentResolver resolver = context.getContentResolver();
+-        int target = Math.max(128, targetPx);
+         try {
+             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                 ImageDecoder.Source source = ImageDecoder.createSource(resolver, uri);
+@@ -140,6 +153,7 @@ final class MediaUtils {
+                     if (scale < 1f) decoder.setTargetSize(
+                             Math.max(1, Math.round(width * scale)),
+                             Math.max(1, Math.round(height * scale)));
++                    decoder.setMemorySizePolicy(ImageDecoder.MEMORY_POLICY_LOW_RAM);
+                     decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE);
+                 });
+             }
+@@ -147,8 +161,10 @@ final class MediaUtils {
+             BitmapFactory.Options bounds = new BitmapFactory.Options();
+             bounds.inJustDecodeBounds = true;
+             try (InputStream stream = resolver.openInputStream(uri)) {
++                if (stream == null) return null;
+                 BitmapFactory.decodeStream(stream, null, bounds);
+             }
++            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
+             int sample = 1;
+             while (Math.max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= target) sample *= 2;
+             BitmapFactory.Options options = new BitmapFactory.Options();
+@@ -156,6 +172,7 @@ final class MediaUtils {
+             options.inPreferredConfig = Bitmap.Config.ARGB_8888;
+             Bitmap bitmap;
+             try (InputStream stream = resolver.openInputStream(uri)) {
++                if (stream == null) return null;
+                 bitmap = BitmapFactory.decodeStream(stream, null, options);
+             }
+             if (bitmap == null) return null;
+diff --git a/app/src/main/java/cz/fotobezprechodu/ViewerActivity.java b/app/src/main/java/cz/fotobezprechodu/ViewerActivity.java
+index 72ed1cb..25b1b2c 100644
+--- a/app/src/main/java/cz/fotobezprechodu/ViewerActivity.java
++++ b/app/src/main/java/cz/fotobezprechodu/ViewerActivity.java
+@@ -21,6 +21,7 @@ import android.os.Looper;
+ import android.provider.OpenableColumns;
+ import android.text.InputType;
+ import android.util.LruCache;
++import android.view.GestureDetector;
+ import android.view.Gravity;
+ import android.view.MotionEvent;
+ import android.view.ScaleGestureDetector;
+@@ -66,6 +67,7 @@ public class ViewerActivity extends Activity {
+     private TextView status, gestureInfo;
+     private Button slideshowButton, videoButton, stopButton, lockButton;
+     private ScaleGestureDetector scaler;
++    private GestureDetector taps;
+     private LruCache<String, Bitmap> cache;
+     private MediaPlayer player;
+     private AudioManager audio;
+@@ -197,12 +199,40 @@ public class ViewerActivity extends Activity {
+             }
+             @Override public void onScaleEnd(ScaleGestureDetector d) { clampZoom(); applyZoom(); updateStatus(); }
+         });
++        taps = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
++            @Override public boolean onDown(MotionEvent e) { return true; }
++
++            @Override public boolean onSingleTapConfirmed(MotionEvent e) {
++                if (scaling || moved || gestureMode != G_NONE) return false;
++                float position = e.getX() / Math.max(1f, stage.getWidth());
++                if (tapNextGesture && (position < .4f || position > .6f)) {
++                    stopSlideshow();
++                    next();
++                } else {
++                    controls.setVisibility(controls.getVisibility() == View.VISIBLE
++                            ? View.GONE : View.VISIBLE);
++                }
++                return true;
++            }
++
++            @Override public boolean onDoubleTap(MotionEvent e) {
++                if (!currentVideo()) return false;
++                toggleVideo();
++                boolean isPlaying = false;
++                try { isPlaying = player != null && prepared && player.isPlaying(); }
++                catch (Exception ignored) {}
++                showGesture(isPlaying ? "▶  Přehrávání" : "⏸  Pauza");
++                hideGestureLater();
++                return true;
++            }
++        });
+         touch.setOnTouchListener(this::touch);
+         updateButtons();
+     }
+ 
+     private boolean touch(View v, MotionEvent e) {
+         scaler.onTouchEvent(e);
++        taps.onTouchEvent(e);
+         switch (e.getActionMasked()) {
+             case MotionEvent.ACTION_DOWN:
+                 downX = lastX = e.getX(); downY = lastY = e.getY();
+@@ -230,14 +260,10 @@ public class ViewerActivity extends Activity {
+                 lastX = x; lastY = y; return true;
+             case MotionEvent.ACTION_UP:
+                 float ux = e.getX() - downX, uy = e.getY() - downY;
+-                if (!scaling && gestureMode == G_NONE) {
+-                    if (zoom <= 1.001f && Math.abs(ux) > dp(60) && Math.abs(ux) > Math.abs(uy)) {
+-                        stopSlideshow(); if (ux < 0) next(); else previous();
+-                    } else if (!moved && Math.abs(ux) < dp(12) && Math.abs(uy) < dp(12)) {
+-                        float p = e.getX() / Math.max(1f, v.getWidth());
+-                        if (tapNextGesture && (p < .4f || p > .6f)) { stopSlideshow(); next(); }
+-                        else controls.setVisibility(controls.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
+-                    }
++                if (!scaling && gestureMode == G_NONE
++                        && zoom <= 1.001f && Math.abs(ux) > dp(60) && Math.abs(ux) > Math.abs(uy)) {
++                    stopSlideshow();
++                    if (ux < 0) next(); else previous();
+                 }
+                 gestureMode = G_NONE; scaling = false; hideGestureLater(); updateStatus(); return true;
+             case MotionEvent.ACTION_CANCEL:
+@@ -271,10 +297,16 @@ public class ViewerActivity extends Activity {
+         if (tree == null || folder == null) return false;
+         Uri treeUri = Uri.parse(tree);
+         String selected = in.getStringExtra(BrowserActivity.EXTRA_SELECTED_ID);
+-        loadFolder(treeUri, folder, selected); return true;
++        String selectedUriText = in.getStringExtra(BrowserActivity.EXTRA_SELECTED_URI);
++        Uri selectedUri = selectedUriText == null ? null : Uri.parse(selectedUriText);
++        String selectedName = in.getStringExtra(BrowserActivity.EXTRA_SELECTED_NAME);
++        String selectedMime = in.getStringExtra(BrowserActivity.EXTRA_SELECTED_MIME);
++        loadFolder(treeUri, folder, selected, selectedUri, selectedName, selectedMime);
++        return true;
+     }
+ 
+-    private void loadFolder(Uri tree, String folder, String selected) {
++    private void loadFolder(Uri tree, String folder, String selected, Uri selectedUri,
++                            String selectedName, String selectedMime) {
+         resetCollection();
+         status.setText("Načítám složku…");
+         int g = generation.incrementAndGet();
+@@ -283,11 +315,36 @@ public class ViewerActivity extends Activity {
+             found.removeIf(x -> x.directory);
+             main.post(() -> {
+                 if (g != generation.get()) return;
++                int start = -1;
++                if (selected != null) {
++                    for (int i = 0; i < found.size(); i++) {
++                        MediaUtils.Entry entry = found.get(i);
++                        if (selected.equals(entry.documentId)) {
++                            start = i;
++                            if (selectedUri != null) {
++                                found.set(i, new MediaUtils.Entry(entry.documentId, selectedUri,
++                                        selectedName == null ? entry.name : selectedName,
++                                        selectedMime == null ? entry.mime : selectedMime, false,
++                                        MediaUtils.isVideo(selectedMime == null ? entry.mime : selectedMime,
++                                                selectedName == null ? entry.name : selectedName)));
++                            }
++                            break;
++                        }
++                    }
++                }
++                if (start < 0 && selectedUri != null) {
++                    String fallbackName = selectedName == null ? "Vybraný soubor" : selectedName;
++                    found.add(new MediaUtils.Entry(selected == null ? selectedUri.toString() : selected,
++                            selectedUri, fallbackName, selectedMime, false,
++                            MediaUtils.isVideo(selectedMime, fallbackName)));
++                    start = found.size() - 1;
++                }
+                 items.addAll(found);
+-                if (items.isEmpty()) { status.setText("V této složce nejsou fotografie ani videa"); return; }
+-                int start = 0;
+-                if (selected != null) for (int i = 0; i < items.size(); i++) if (selected.equals(items.get(i).documentId)) { start = i; break; }
+-                display(start);
++                if (items.isEmpty()) {
++                    status.setText("V této složce nejsou fotografie ani videa");
++                    return;
++                }
++                display(start < 0 ? 0 : start);
+             });
+         });
+     }
+@@ -332,7 +389,7 @@ public class ViewerActivity extends Activity {
+     }
+ 
+     private void showImage(int i, int g) {
+-        releasePlayer(); video.setAlpha(0); image.setAlpha(1); updateButtons();
++        releasePlayer(); video.setAlpha(0); image.setVisibility(View.VISIBLE); image.setAlpha(1); updateButtons();
+         String key = "i:" + items.get(i).uri;
+         Bitmap b = cache.get(key);
+         if (b != null) readyImage(i, g, b); else loadImage(i);
+@@ -344,9 +401,17 @@ public class ViewerActivity extends Activity {
+         MediaUtils.Entry e = items.get(i); int g = generation.get();
+         worker.execute(() -> {
+             int screen = Math.max(getResources().getDisplayMetrics().widthPixels, getResources().getDisplayMetrics().heightPixels);
+-            Bitmap b = MediaUtils.decodeImage(this, e.uri, Math.min(4096, screen * 3));
++            Bitmap b = MediaUtils.decodeImage(this, e.uri, Math.min(3072, Math.max(screen, screen * 2)));
+             if (b != null) cache.put(key, b);
+-            main.post(() -> { if (b != null && requested == i && g == generation.get()) readyImage(i, g, b); });
++            main.post(() -> {
++                if (requested != i || g != generation.get()) return;
++                if (b != null) {
++                    readyImage(i, g, b);
++                } else {
++                    status.setText("Obrázek se nepodařilo načíst: " + e.name);
++                    Toast.makeText(this, "Obrázek se nepodařilo načíst", Toast.LENGTH_SHORT).show();
++                }
++            });
+         });
+     }
+     private void readyImage(int i, int g, Bitmap b) {
