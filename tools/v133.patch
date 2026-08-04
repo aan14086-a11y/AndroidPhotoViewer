@@ -1,0 +1,77 @@
+diff -ruN a/app/build.gradle b/app/build.gradle
+--- a/app/build.gradle	2026-08-04 05:15:33.124561354 +0000
++++ b/app/build.gradle	2026-08-04 05:16:03.080560204 +0000
+@@ -10,8 +10,8 @@
+         applicationId 'cz.fotobezprechodu'
+         minSdk 26
+         targetSdk 35
+-        versionCode 6
+-        versionName '1.3.2'
++        versionCode 7
++        versionName '1.3.3'
+     }
+ 
+     compileOptions {
+diff -ruN a/app/src/main/java/cz/fotobezprechodu/ViewerActivity.java b/app/src/main/java/cz/fotobezprechodu/ViewerActivity.java
+--- a/app/src/main/java/cz/fotobezprechodu/ViewerActivity.java	2026-08-04 05:15:29.472561494 +0000
++++ b/app/src/main/java/cz/fotobezprechodu/ViewerActivity.java	2026-08-04 05:16:03.080560204 +0000
+@@ -389,7 +389,7 @@
+     }
+ 
+     private void showImage(int i, int g) {
+-        releasePlayer(); video.setAlpha(0); image.setVisibility(View.VISIBLE); image.setAlpha(1); updateButtons();
++        releasePlayer(); activateImageLayer(); updateButtons();
+         String key = "i:" + items.get(i).uri;
+         Bitmap b = cache.get(key);
+         if (b != null) readyImage(i, g, b); else loadImage(i);
+@@ -416,11 +416,39 @@
+     }
+     private void readyImage(int i, int g, Bitmap b) {
+         if (g != generation.get() || requested != i) return;
+-        image.setImageBitmap(b); image.setAlpha(1); video.setAlpha(0); preload(i); schedule(); updateStatus();
++        image.setImageBitmap(b);
++        activateImageLayer();
++        image.invalidate();
++        stage.invalidate();
++        preload(i); schedule(); updateStatus();
+     }
+ 
+     private void showVideo(int i, int g) {
+-        releasePlayer(); finished = false; video.setAlpha(0); image.setAlpha(1); loadPoster(i); prepareVideo(i, g); preload(i); updateButtons();
++        releasePlayer(); finished = false; activateVideoLayer(); loadPoster(i); prepareVideo(i, g); preload(i); updateButtons();
++    }
++
++    private void activateImageLayer() {
++        if (video != null) {
++            video.setAlpha(0f);
++            video.setVisibility(View.INVISIBLE);
++        }
++        if (image != null) {
++            image.setVisibility(View.VISIBLE);
++            image.setAlpha(1f);
++            image.bringToFront();
++        }
++    }
++
++    private void activateVideoLayer() {
++        if (image != null) {
++            image.setVisibility(View.VISIBLE);
++            image.setAlpha(1f);
++        }
++        if (video != null) {
++            video.setVisibility(View.VISIBLE);
++            video.setAlpha(0f);
++            video.bringToFront();
++        }
+     }
+     private void loadPoster(int i) {
+         MediaUtils.Entry e = items.get(i); String key = "v:" + e.uri;
+@@ -435,6 +463,8 @@
+     }
+     private void prepareVideo(int i, int g) {
+         if (i < 0 || i >= items.size() || g != generation.get() || requested != i) return;
++        video.setVisibility(View.VISIBLE);
++        video.bringToFront();
+         if (!video.isAvailable()) { pendingVideo = i; pendingGeneration = g; return; }
+         try {
+             MediaPlayer mp = new MediaPlayer(); player = mp;
