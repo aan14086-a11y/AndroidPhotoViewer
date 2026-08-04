@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - agent/fix-fullscreen-image-layer-v133
+      - agent/fix-large-image-render-v134
   pull_request:
     branches:
       - main
@@ -39,6 +39,9 @@ jobs:
 
       - name: Apply v1.3.3 image layer fix
         run: git apply --verbose tools/v133.patch
+
+      - name: Apply v1.3.4 large image render fix
+        run: python3 tools/apply_v134.py
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -83,12 +86,12 @@ jobs:
         run: gradle :app:assembleDebug --stacktrace
 
       - name: Prepare APK file
-        run: cp app/build/outputs/apk/debug/app-debug.apk FotoBezPrechodu-v1.3.3.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk FotoBezPrechodu-v1.3.4.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Foto-bez-prechodu-v1.3.3
-          path: FotoBezPrechodu-v1.3.3.apk
+          name: Foto-bez-prechodu-v1.3.4
+          path: FotoBezPrechodu-v1.3.4.apk
           if-no-files-found: error
           retention-days: 30
