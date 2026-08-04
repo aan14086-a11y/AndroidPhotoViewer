@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - agent/folder-browser-gestures
       - agent/fix-black-screen-double-tap
   pull_request:
     branches:
@@ -32,16 +31,8 @@ jobs:
             tar -xzf /tmp/apv13-src.tar.gz
           fi
 
-      - name: Upload restored sources
-        uses: actions/upload-artifact@v4
-        with:
-          name: restored-v13-sources
-          path: |
-            app/src/main/java
-            app/src/main/AndroidManifest.xml
-            app/build.gradle
-          if-no-files-found: error
-          retention-days: 1
+      - name: Apply v1.3.1 fixes
+        run: git apply --verbose tools/v131.patch
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -86,12 +77,12 @@ jobs:
         run: gradle :app:assembleDebug --stacktrace
 
       - name: Prepare APK file
-        run: cp app/build/outputs/apk/debug/app-debug.apk FotoBezPrechodu-v1.3.0.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk FotoBezPrechodu-v1.3.1.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Foto-bez-prechodu-v1.3.0
-          path: FotoBezPrechodu-v1.3.0.apk
+          name: Foto-bez-prechodu-v1.3.1
+          path: FotoBezPrechodu-v1.3.1.apk
           if-no-files-found: error
           retention-days: 30
