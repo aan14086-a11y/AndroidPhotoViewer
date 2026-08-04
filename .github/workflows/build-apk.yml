@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - agent/folder-browser-gestures
+      - agent/fix-black-screen-double-tap
   pull_request:
     branches:
       - main
@@ -30,6 +31,17 @@ jobs:
             echo "42cc2826898d7eec4a4eb3e554f861b60c661c47f9fc10238f3644c367e5c6df  /tmp/apv13-src.tar.gz" | sha256sum --check
             tar -xzf /tmp/apv13-src.tar.gz
           fi
+
+      - name: Upload restored sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: restored-v13-sources
+          path: |
+            app/src/main/java
+            app/src/main/AndroidManifest.xml
+            app/build.gradle
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
