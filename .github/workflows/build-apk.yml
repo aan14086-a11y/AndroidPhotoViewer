@@ -35,7 +35,7 @@ jobs:
         run: git apply --verbose tools/v131.patch
 
       - name: Apply v1.3.2 image decoder fix
-        run: git apply --verbose tools/v132.patch
+        run: python3 tools/apply_v132.py
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
