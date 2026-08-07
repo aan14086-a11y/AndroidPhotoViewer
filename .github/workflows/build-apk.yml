@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - agent/compact-bottom-control-panel-v140
+      - agent/v140-folder-count-edge-taps-v143
   pull_request:
     branches:
       - main
@@ -60,6 +60,17 @@ jobs:
 
       - name: Apply v1.4.0 compact control panel
         run: python3 tools/apply_v140.py
+
+      - name: Pack generated v1.4.0 sources
+        run: tar -czf generated-v140-sources.tar.gz app/src/main app/build.gradle
+
+      - name: Upload generated v1.4.0 sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-v140-sources
+          path: generated-v140-sources.tar.gz
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
