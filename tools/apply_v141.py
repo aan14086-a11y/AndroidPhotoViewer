@@ -22,3 +22,15 @@ source = source.replace(stale_expected, current_expected, 1)
 source = source.replace(stale_replacement, corrected_replacement, 1)
 
 exec(compile(source, 'tools/apply_v141_source.py', 'exec'), {'__name__': '__main__'})
+
+# v1.3.1 already introduced this intent key. The v1.4.1 compatibility payload
+# was authored against the older source and adds it again, so remove only the
+# second declaration after all source transformations have completed.
+browser = Path('app/src/main/java/cz/fotobezprechodu/BrowserActivity.java')
+browser_text = browser.read_text(encoding='utf-8')
+constant = '    static final String EXTRA_SELECTED_URI = "selected_uri";\n'
+first = browser_text.find(constant)
+second = browser_text.find(constant, first + len(constant)) if first >= 0 else -1
+if first < 0 or second < 0:
+    raise SystemExit('Expected duplicate EXTRA_SELECTED_URI declarations were not found')
+browser.write_text(browser_text[:second] + browser_text[second + len(constant):], encoding='utf-8')
